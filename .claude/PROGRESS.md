@@ -23,8 +23,16 @@
 - Updated all issue references to correct ZAL IDs ✅
 - Created ZAL-12 in Linear and marked as Done ✅
 
-## Session 4 — Next steps
-- [ ] ZAL-7: Regenerate a single meal
+## Session 4 — Done
+- Built replace-meal Edge Function (ZAL-7) ✅
+- Built "Replace this meal" button with per-card loading/disabled state (ZAL-7) ✅
+- AC testing checklist introduced — all 5 criteria verified before commit ✅
+- Created WORKFLOW.md — documents AI collaboration preferences ✅
+- Linear↔GitHub integration set up ✅
+- Created docs/TECHNICAL.md — full API reference for all 3 Edge Functions ✅
+- Created docs/USER_GUIDE.md — user-facing feature documentation ✅
+
+## Session 5 — Next steps
 - [ ] ZAL-8: Generate a consolidated shopping list
 - [ ] ZAL-9: Check off and copy the shopping list
 - [ ] Deploy frontend to Vercel
