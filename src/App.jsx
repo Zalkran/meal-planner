@@ -6,6 +6,7 @@ import { supabase } from './lib/supabase'
 
 function App() {
   const [mealPlan, setMealPlan] = useState(null)
+  const [preferences, setPreferences] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -19,6 +20,7 @@ function App() {
     setLoading(true)
     setError(null)
     setMealPlan(null)
+    setPreferences(preferences)
 
     const { data, error: fnError } = await supabase.functions.invoke(
       'generate-meal-plan',
@@ -72,6 +74,34 @@ function App() {
     setRecipe(data)
   }
 
+  const handleReplaceMeal = async (dayLabel, mealType) => {
+    const { data, error: fnError } = await supabase.functions.invoke('replace-meal', {
+      body: {
+        dayLabel,
+        mealType,
+        currentPlan: mealPlan.days.map((d) => ({
+          day: d.day,
+          meals: [
+            { type: 'lunch', dish: d.lunch.name },
+            { type: 'dinner', dish: d.dinner.name },
+          ],
+        })),
+        preferences,
+        language: navigator.language,
+      },
+    })
+
+    if (fnError) throw fnError
+
+    setMealPlan((prev) => ({
+      ...prev,
+      days: prev.days.map((d) => {
+        if (d.day !== dayLabel) return d
+        return { ...d, [mealType]: { ...d[mealType], name: data.dish } }
+      }),
+    }))
+  }
+
   const handleCloseModal = () => {
     setModalOpen(false)
     setRecipe(null)
@@ -95,6 +125,7 @@ function App() {
           labels={mealPlan.labels}
           onReset={() => setMealPlan(null)}
           onMealClick={handleMealClick}
+          onReplaceMeal={handleReplaceMeal}
         />
       ) : (
         <>

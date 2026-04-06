@@ -74,6 +74,7 @@ meal-planner/
 │       └── get-recipe/           ← not built yet
 ├── .claude/
 │   └── PROGRESS.md               ← current status
+│   └── WORKFLOW.md               ← AI collaboration preferences (read this too)
 ├── .env                          ← never committed
 └── CLAUDE.md                     ← you are here
 
