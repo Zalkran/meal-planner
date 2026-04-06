@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { getReplaceMealStrings } from '../lib/i18n'
 
 const MEAL_ICON = { lunch: '☀️', dinner: '🌙' }
 
@@ -7,9 +8,6 @@ const DEFAULT_LABELS = {
   dinner: 'Dinner',
   yourMealPlan: 'Your meal plan',
   modifyPreferences: '← Modify my preferences',
-  replaceMeal: 'Replace this meal',
-  replacing: 'Replacing…',
-  replaceError: 'Failed to replace. Try again.',
 }
 
 function Spinner() {
@@ -141,7 +139,11 @@ function DayCard({ day, lunch, dinner, labels, onMealClick, onReplace, replacing
 }
 
 export default function MealPlan({ days, labels = DEFAULT_LABELS, onReset, onMealClick, onReplaceMeal }) {
-  const mergedLabels = { ...DEFAULT_LABELS, ...labels }
+  const mergedLabels = {
+    ...DEFAULT_LABELS,
+    ...getReplaceMealStrings(navigator.language),
+    ...labels,
+  }
 
   const [replacingKey, setReplacingKey] = useState(null)
   const [replaceError, setReplaceError] = useState(null)
