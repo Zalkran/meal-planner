@@ -123,7 +123,14 @@ Generates a 7-day meal plan based on user preferences.
 
 ### `get-recipe`
 
-Returns a full recipe for a named dish.
+Returns a full recipe for a named dish. Responses are cached in the `recipes_cache` Supabase table — a cache hit returns instantly without calling Claude API.
+
+**Cache behaviour**
+
+1. Normalise the key: lowercase + trim `dishName`, extract base language tag (e.g. `"fr"` from `"fr-FR"`), clamp `servings` to 1–8.
+2. Query `recipes_cache` for `(dish_name, servings, language)`.
+3. **Hit** — return the cached row immediately; Claude is never called.
+4. **Miss** — call Claude, return the recipe, write to cache in the background (fire-and-forget). A write failure is logged but never surfaced to the caller.
 
 **Rate limit:** 20 requests / IP / hour
 
@@ -206,6 +213,29 @@ Suggests a single replacement dish for one meal slot, avoiding all dishes alread
 ```json
 { "dish": "Ratatouille" }
 ```
+
+---
+
+## Database
+
+### `recipes_cache`
+
+Caches Claude API recipe responses to avoid redundant calls. Populated automatically by `get-recipe` on cache miss.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigint (identity) | Primary key |
+| `dish_name` | text | Lowercased, trimmed dish name |
+| `servings` | integer (1–8) | Number of servings |
+| `language` | text | Base language tag (`"fr"`, `"en"`, etc.) |
+| `name` | text | Localised dish name as returned by Claude |
+| `prep_time` | text | e.g. `"15 min"` |
+| `cook_time` | text | e.g. `"45 min"` |
+| `ingredients` | jsonb | Array of `{ name, quantity }` objects |
+| `steps` | jsonb | Array of step strings |
+| `created_at` | timestamptz | Set on insert, defaults to `now()` |
+
+**Unique constraint:** `(dish_name, servings, language)` — used as the cache key. Upserts with `ignoreDuplicates: true` make concurrent writes safe.
 
 ---
 

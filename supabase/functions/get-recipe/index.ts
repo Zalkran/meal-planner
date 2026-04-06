@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import { createClient } from "jsr:@supabase/supabase-js@2"
 
 // ---------------------------------------------------------------------------
 // CORS
@@ -90,6 +91,76 @@ const LANGUAGE_NAMES: Record<string, string> = {
 function getLanguageName(language: string): string {
   const code = language.split("-")[0].toLowerCase()
   return LANGUAGE_NAMES[code] ?? "English"
+}
+
+// ---------------------------------------------------------------------------
+// Supabase client (service role — cache reads/writes bypass RLS)
+// ---------------------------------------------------------------------------
+function getSupabaseClient() {
+  const url = Deno.env.get("SUPABASE_URL")
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+  if (!url || !key) throw new Error("Supabase env vars not configured")
+  return createClient(url, key)
+}
+
+// ---------------------------------------------------------------------------
+// Cache helpers
+// ---------------------------------------------------------------------------
+function normalizeCacheKey(req: RecipeRequest): { dish_name: string; servings: number; language: string } {
+  return {
+    dish_name: req.dishName.toLowerCase().trim(),
+    servings: req.servings,
+    language: req.language.split("-")[0].toLowerCase(),
+  }
+}
+
+async function getCachedRecipe(req: RecipeRequest): Promise<Recipe | null> {
+  const key = normalizeCacheKey(req)
+  const supabase = getSupabaseClient()
+
+  const { data, error } = await supabase
+    .from("recipes_cache")
+    .select("name, prep_time, cook_time, servings, ingredients, steps")
+    .eq("dish_name", key.dish_name)
+    .eq("servings", key.servings)
+    .eq("language", key.language)
+    .maybeSingle()
+
+  if (error || !data) return null
+
+  return {
+    name: data.name,
+    prepTime: data.prep_time,
+    cookTime: data.cook_time,
+    servings: data.servings,
+    ingredients: data.ingredients as Ingredient[],
+    steps: data.steps as string[],
+  }
+}
+
+async function writeCachedRecipe(req: RecipeRequest, recipe: Recipe): Promise<void> {
+  const key = normalizeCacheKey(req)
+  const supabase = getSupabaseClient()
+
+  const { error } = await supabase
+    .from("recipes_cache")
+    .upsert(
+      {
+        dish_name: key.dish_name,
+        servings: key.servings,
+        language: key.language,
+        name: recipe.name,
+        prep_time: recipe.prepTime,
+        cook_time: recipe.cookTime,
+        ingredients: recipe.ingredients,
+        steps: recipe.steps,
+      },
+      { onConflict: "dish_name,servings,language", ignoreDuplicates: true },
+    )
+
+  if (error) {
+    console.error("Cache write failed:", error.message)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +287,17 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const cached = await getCachedRecipe(recipeReq)
+    if (cached) {
+      return jsonResponse(cached)
+    }
+
     const recipe = await callClaude(recipeReq)
+
+    writeCachedRecipe(recipeReq, recipe).catch((err) => {
+      console.error("Cache write error (non-blocking):", err)
+    })
+
     return jsonResponse(recipe)
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error"
