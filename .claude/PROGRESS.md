@@ -26,9 +26,12 @@
 ## Session 4 — Done
 - Built replace-meal Edge Function (ZAL-7) ✅
 - Built "Replace this meal" button with per-card loading/disabled state (ZAL-7) ✅
+- i18n retrofit: all replace-meal UI strings now language-aware via navigator.language (ZAL-13) ✅
+- Created src/lib/i18n.js helper — covers fr, de, en; falls back to en for any other locale ✅
 - AC testing checklist introduced — all 5 criteria verified before commit ✅
+- i18n non-negotiable rule added to WORKFLOW.md commit checklist ✅
 - Created WORKFLOW.md — documents AI collaboration preferences ✅
-- Linear↔GitHub integration set up ✅
+- Linear↔GitHub integration set up — commit messages include ZAL-X for deep links ✅
 - Created docs/TECHNICAL.md — full API reference for all 3 Edge Functions ✅
 - Created docs/USER_GUIDE.md — user-facing feature documentation ✅
 

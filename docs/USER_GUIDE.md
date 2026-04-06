@@ -4,7 +4,7 @@
 
 Meal Planner generates a personalised 7-day meal plan in seconds — lunch and dinner for every day of the week. No account needed. Just enter your preferences, get your plan, and start cooking.
 
-The app is available in multiple languages. It automatically uses your browser's language setting.
+The app is fully multilingual. It automatically detects your browser's language (`navigator.language`) and uses it for all user-facing text — meal names, day names, buttons, labels, and error messages. No manual language selection is needed.
 
 ---
 
@@ -44,7 +44,7 @@ If a suggested meal doesn't suit you:
 2. A spinner appears on that card while a new suggestion is being generated. The rest of your plan stays exactly as it is.
 3. Once the replacement arrives, only that meal is updated in the plan. All other meals are unchanged.
 
-If the replacement fails (e.g. network issue), a short error message appears on the card. The original dish is kept. You can try again by clicking **Replace this meal** again.
+If the replacement fails (e.g. network issue), a short error message appears on the card in your language. The original dish is kept. You can try again by clicking **Replace this meal** again.
 
 ---
 

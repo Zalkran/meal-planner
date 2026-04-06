@@ -54,9 +54,10 @@ Claude Code must follow these steps in order. Do not skip any.
 
 ### Step 1 — Test acceptance criteria
 - For Edge Functions: write and run Deno tests covering every AC item
-- For frontend: run `npm run build` (must pass with zero errors), then go
-  through each AC item explicitly and confirm pass/fail
+- For frontend: run `npm run build` (must pass with zero errors), then go through each AC item explicitly and confirm pass/fail
 - If any AC item fails: fix it, retest, do not proceed until all pass
+- Verify that all user-facing strings introduced in this feature 
+are language-aware (no hardcoded English)
 
 ### Step 2 — Check Linear boxes
 - Once all AC items pass, update the Linear issue description to check

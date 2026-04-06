@@ -49,6 +49,7 @@ No account required — friction zero is a core principle.
 - ALWAYS use the user's browser language for generated content
 - NEVER commit .env to Git
 - ALWAYS redeploy Edge Functions with verify_jwt = false
+- ALWAYS use the user's browser language (navigator.language) for every user-facing string — labels, buttons, messages, placeholders, errors. No hardcoded English. Pass the language to the Edge Function and let Claude API handle translation in its response.
 
 ## Code conventions
 - One component per file in src/components/
