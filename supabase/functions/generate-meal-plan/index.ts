@@ -202,57 +202,6 @@ Use this exact structure:
 }
 
 // ---------------------------------------------------------------------------
-// String-aware brace-depth parser
-//
-// Scans accumulated text and extracts complete JSON objects that appear at
-// depth 2 inside the outer {"days":[...]} envelope (depth 0 = outside, 1 =
-// inside the root object, 2 = inside the "days" array).
-//
-// String-awareness: characters inside quoted strings (including escaped
-// quotes) are never counted as brace/bracket delimiters, preventing dish
-// names like "Gratin {maison}" from corrupting the depth counter.
-// ---------------------------------------------------------------------------
-function extractNextDay(text: string, searchFrom: number): { json: string; end: number } | null {
-  let depth = 0
-  let inString = false
-  let escaped = false
-  let objectStart = -1
-
-  for (let i = searchFrom; i < text.length; i++) {
-    const ch = text[i]
-
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (ch === "\\" && inString) {
-      escaped = true
-      continue
-    }
-    if (ch === '"') {
-      inString = !inString
-      continue
-    }
-    if (inString) continue
-
-    if (ch === "{" || ch === "[") {
-      // A day object sits at depth 2: inside the outer { and inside the [ array.
-      // Only open a capture window when we see { at exactly that depth.
-      if (ch === "{" && depth === 2) objectStart = i
-      depth++
-    } else if (ch === "}" || ch === "]") {
-      depth--
-      // Closing } that returns us to depth 2 completes a day object.
-      if (ch === "}" && depth === 2 && objectStart !== -1) {
-        return { json: text.slice(objectStart, i + 1), end: i + 1 }
-      }
-    }
-  }
-
-  return null
-}
-
-// ---------------------------------------------------------------------------
 // SSE helpers
 // ---------------------------------------------------------------------------
 function sseEvent(event: string, data: unknown): string {
@@ -324,7 +273,9 @@ Deno.serve(async (req: Request) => {
       // Emit labels immediately — no Claude call needed
       emit("labels", getUiLabels(prefs.language))
 
-      // Call Claude with streaming enabled
+      // Call Claude — standard request/response (streaming from Claude to the
+      // edge function proved unreliable: Cloudflare terminates long-lived
+      // outbound connections before all 7 days arrive).
       let claudeResponse: Response
       try {
         claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
@@ -337,13 +288,12 @@ Deno.serve(async (req: Request) => {
           body: JSON.stringify({
             model: MODEL,
             max_tokens: 2048,
-            stream: true,
             system:
               "You are a professional nutritionist and chef. You create balanced, varied, and delicious meal plans tailored to dietary restrictions and budgets. You always respond with valid JSON only — never markdown, never prose.",
             messages: [{ role: "user", content: buildPrompt(prefs) }],
           }),
         })
-      } catch (err) {
+      } catch {
         emit("error", { message: "Failed to reach Claude API" })
         controller.close()
         return
@@ -355,72 +305,24 @@ Deno.serve(async (req: Request) => {
         return
       }
 
-      // Read the Claude SSE stream, accumulate text_delta chunks
-      const reader = claudeResponse.body!.getReader()
-      const decoder = new TextDecoder()
-      let accumulated = ""
-      let parseOffset = 0
-      let daysEmitted = 0
-
+      let days: Day[]
       try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          // Claude streams SSE — extract text_delta content from each event
-          const chunk = decoder.decode(value, { stream: true })
-          for (const line of chunk.split("\n")) {
-            if (!line.startsWith("data: ")) continue
-            const payload = line.slice(6)
-            if (payload === "[DONE]") continue
-            try {
-              const event = JSON.parse(payload)
-              if (event?.type === "content_block_delta" && event?.delta?.type === "text_delta") {
-                accumulated += event.delta.text
-              }
-            } catch {
-              // Malformed SSE line — skip and continue
-            }
-          }
-
-          // Try to extract complete day objects from accumulated text
-          while (true) {
-            const result = extractNextDay(accumulated, parseOffset)
-            if (!result) break
-
-            parseOffset = result.end
-
-            let day: Day
-            try {
-              day = JSON.parse(result.json)
-            } catch {
-              emit("error", { message: "Received malformed day data from Claude" })
-              controller.close()
-              return
-            }
-
-            if (!day.day || !day.lunch?.name || !day.dinner?.name) {
-              emit("error", { message: "Received incomplete day data from Claude" })
-              controller.close()
-              return
-            }
-
-            emit("day", day)
-            daysEmitted++
-
-            if (daysEmitted === 7) break
-          }
-
-          if (daysEmitted === 7) break
+        const data = await claudeResponse.json()
+        const rawText: string = data?.content?.[0]?.text ?? ""
+        const parsed = JSON.parse(rawText)
+        if (!Array.isArray(parsed?.days) || parsed.days.length !== 7) {
+          throw new Error("unexpected structure")
         }
-      } catch (err) {
-        emit("error", { message: "Stream interrupted" })
+        days = parsed.days
+      } catch {
+        emit("error", { message: "Claude returned an unexpected response" })
         controller.close()
         return
       }
 
-      if (daysEmitted < 7) {
-        emit("error", { message: "Meal plan generation was incomplete" })
+      // Emit each day as its own SSE event — frontend renders cards one by one
+      for (const day of days) {
+        emit("day", day)
       }
 
       controller.close()
