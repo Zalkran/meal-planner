@@ -1,19 +1,14 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import PreferencesForm from './components/PreferencesForm'
 import MealPlan from './components/MealPlan'
 import RecipeModal from './components/RecipeModal'
 import { supabase } from './lib/supabase'
-import { getAppStrings } from './lib/i18n'
 
 function App() {
   const [mealPlan, setMealPlan] = useState(null)
   const [preferences, setPreferences] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-
-  // Incremented on each new generation and on reset — stale stream callbacks
-  // check this ref before updating state, so they silently bail out.
-  const generationRef = useRef(0)
 
   // Recipe modal state
   const [modalOpen, setModalOpen] = useState(false)
@@ -22,98 +17,29 @@ function App() {
   const [recipeError, setRecipeError] = useState(null)
 
   const handleSubmit = async (preferences) => {
-    const generation = ++generationRef.current
-    const strings = getAppStrings(navigator.language)
     setLoading(true)
     setError(null)
     setMealPlan(null)
     setPreferences(preferences)
 
-    // Raw fetch — supabase.functions.invoke does not support streaming
-    let response
-    try {
-      response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-meal-plan`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({ ...preferences, language: navigator.language }),
-        },
-      )
-    } catch {
-      if (generation !== generationRef.current) return
-      setError(strings.generalError)
-      setLoading(false)
+    const { data, error: fnError } = await supabase.functions.invoke(
+      'generate-meal-plan',
+      { body: { ...preferences, language: navigator.language } },
+    )
+
+    setLoading(false)
+
+    if (fnError) {
+      const status = fnError.context?.status
+      if (status === 429) {
+        setError("Vous avez atteint la limite horaire, veuillez réessayer plus tard.")
+      } else {
+        setError("Une erreur est survenue, veuillez réessayer.")
+      }
       return
     }
 
-    if (!response.ok) {
-      if (generation !== generationRef.current) return
-      setError(response.status === 429 ? strings.rateLimitError : strings.generalError)
-      setLoading(false)
-      return
-    }
-
-    // Read the SSE stream
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    // Returns false when the stream should stop (error event or stale generation)
-    function processBuffer() {
-      const blocks = buffer.split('\n\n')
-      buffer = blocks.pop() // last element may be an incomplete event
-
-      for (const block of blocks) {
-        if (!block.trim()) continue
-
-        let eventType = ''
-        let dataLine = ''
-        for (const line of block.split('\n')) {
-          if (line.startsWith('event: ')) eventType = line.slice(7).trim()
-          else if (line.startsWith('data: ')) dataLine = line.slice(6)
-        }
-        if (!eventType || !dataLine) continue
-        if (generation !== generationRef.current) return false
-
-        let parsed
-        try {
-          parsed = JSON.parse(dataLine)
-        } catch {
-          continue // malformed data line, skip
-        }
-
-        if (eventType === 'labels') {
-          setMealPlan({ days: [], labels: parsed })
-          setLoading(false)
-        } else if (eventType === 'day') {
-          setMealPlan((prev) => prev ? { ...prev, days: [...prev.days, parsed] } : prev)
-        } else if (eventType === 'error') {
-          setError(strings.generalError)
-          setLoading(false)
-          return false
-        }
-      }
-      return true
-    }
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        if (!processBuffer()) break
-      }
-    } catch {
-      if (generation !== generationRef.current) return
-      setError(strings.generalError)
-      // Keep partial plan if any days arrived; otherwise fall back to the form
-      setMealPlan((prev) => (prev?.days?.length > 0 ? prev : null))
-      setLoading(false)
-    }
+    setMealPlan(data)
   }
 
   const handleMealClick = async (meal) => {
@@ -197,23 +123,19 @@ function App() {
         <MealPlan
           days={mealPlan.days}
           labels={mealPlan.labels}
-          onReset={() => {
-            generationRef.current++ // cancel any in-flight stream
-            setMealPlan(null)
-            setError(null)
-            setLoading(false)
-          }}
+          onReset={() => setMealPlan(null)}
           onMealClick={handleMealClick}
           onReplaceMeal={handleReplaceMeal}
         />
       ) : (
-        <PreferencesForm onSubmit={handleSubmit} loading={loading} />
-      )}
-
-      {error && (
-        <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3 max-w-lg w-full text-center">
-          {error}
-        </p>
+        <>
+          <PreferencesForm onSubmit={handleSubmit} loading={loading} />
+          {error && (
+            <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3 max-w-lg w-full text-center">
+              {error}
+            </p>
+          )}
+        </>
       )}
 
       {modalOpen && (

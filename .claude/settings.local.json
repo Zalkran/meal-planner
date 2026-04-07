@@ -3,8 +3,7 @@
     "allow": [
       "Skill(claude-api)",
       "Bash(npm install:*)",
-      "mcp__claude_ai_Linear__get_issue",
-      "Bash(npm run:*)"
+      "mcp__claude_ai_Linear__get_issue"
     ]
   }
 }

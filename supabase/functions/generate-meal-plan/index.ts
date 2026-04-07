@@ -75,6 +75,11 @@ interface UiLabels {
   modifyPreferences: string
 }
 
+interface MealPlanResponse {
+  days: Day[]
+  labels: UiLabels
+}
+
 // ---------------------------------------------------------------------------
 // Localisation
 // ---------------------------------------------------------------------------
@@ -157,7 +162,7 @@ function getUiLabels(language: string): UiLabels {
 }
 
 // ---------------------------------------------------------------------------
-// Claude API prompt
+// Claude API call
 // ---------------------------------------------------------------------------
 const MODEL = "claude-sonnet-4-20250514"
 
@@ -201,15 +206,53 @@ Use this exact structure:
 }`
 }
 
-// ---------------------------------------------------------------------------
-// SSE helpers
-// ---------------------------------------------------------------------------
-function sseEvent(event: string, data: unknown): string {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+async function callClaude(prefs: UserPreferences): Promise<MealPlanResponse> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY")
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured")
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 2048,
+      system:
+        "You are a professional nutritionist and chef. You create balanced, varied, and delicious meal plans tailored to dietary restrictions and budgets. You always respond with valid JSON only — never markdown, never prose.",
+      messages: [{ role: "user", content: buildPrompt(prefs) }],
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`Claude API error ${response.status}: ${errorText}`)
+  }
+
+  const data = await response.json()
+  const rawText: string = data?.content?.[0]?.text ?? ""
+
+  let parsed: { days: Day[] }
+  try {
+    parsed = JSON.parse(rawText)
+  } catch {
+    throw new Error("Claude returned non-JSON output")
+  }
+
+  if (!Array.isArray(parsed?.days) || parsed.days.length !== 7) {
+    throw new Error("Meal plan response has unexpected structure")
+  }
+
+  return {
+    days: parsed.days,
+    labels: getUiLabels(prefs.language),
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Streaming request handler
+// Request handler
 // ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
   // Preflight
@@ -256,86 +299,13 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Invalid JSON body" }, 400)
   }
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY")
-  if (!apiKey) {
-    return jsonResponse({ error: "ANTHROPIC_API_KEY is not configured" }, 500)
+  // Generate meal plan
+  try {
+    const result = await callClaude(prefs)
+    return jsonResponse(result)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal server error"
+    const status = message.startsWith("Claude API error") ? 502 : 500
+    return jsonResponse({ error: message }, status)
   }
-
-  // Build the SSE stream
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder()
-
-      function emit(event: string, data: unknown) {
-        controller.enqueue(encoder.encode(sseEvent(event, data)))
-      }
-
-      // Emit labels immediately — no Claude call needed
-      emit("labels", getUiLabels(prefs.language))
-
-      // Call Claude — standard request/response (streaming from Claude to the
-      // edge function proved unreliable: Cloudflare terminates long-lived
-      // outbound connections before all 7 days arrive).
-      let claudeResponse: Response
-      try {
-        claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model: MODEL,
-            max_tokens: 2048,
-            system:
-              "You are a professional nutritionist and chef. You create balanced, varied, and delicious meal plans tailored to dietary restrictions and budgets. You always respond with valid JSON only — never markdown, never prose.",
-            messages: [{ role: "user", content: buildPrompt(prefs) }],
-          }),
-        })
-      } catch {
-        emit("error", { message: "Failed to reach Claude API" })
-        controller.close()
-        return
-      }
-
-      if (!claudeResponse.ok) {
-        emit("error", { message: `Claude API error ${claudeResponse.status}` })
-        controller.close()
-        return
-      }
-
-      let days: Day[]
-      try {
-        const data = await claudeResponse.json()
-        const rawText: string = data?.content?.[0]?.text ?? ""
-        const parsed = JSON.parse(rawText)
-        if (!Array.isArray(parsed?.days) || parsed.days.length !== 7) {
-          throw new Error("unexpected structure")
-        }
-        days = parsed.days
-      } catch {
-        emit("error", { message: "Claude returned an unexpected response" })
-        controller.close()
-        return
-      }
-
-      // Emit each day as its own SSE event — frontend renders cards one by one
-      for (const day of days) {
-        emit("day", day)
-      }
-
-      controller.close()
-    },
-  })
-
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      ...CORS_HEADERS,
-    },
-  })
 })
