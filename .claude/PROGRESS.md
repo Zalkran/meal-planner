@@ -35,6 +35,7 @@
 - Created docs/TECHNICAL.md — full API reference for all 3 Edge Functions ✅
 - Created docs/USER_GUIDE.md — user-facing feature documentation ✅
 - ZAL-14: Cache recipes in Supabase to reduce Claude API calls ✅
+- ZAL-15: Stream generate-meal-plan response to reduce perceived load time ✅
 
 ## Session 5 — Next steps
 - [ ] ZAL-8: Generate a consolidated shopping list
