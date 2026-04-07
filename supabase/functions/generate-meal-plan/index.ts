@@ -235,12 +235,15 @@ function extractNextDay(text: string, searchFrom: number): { json: string; end: 
     }
     if (inString) continue
 
-    if (ch === "{") {
-      if (depth === 0) objectStart = i
+    if (ch === "{" || ch === "[") {
+      // A day object sits at depth 2: inside the outer { and inside the [ array.
+      // Only open a capture window when we see { at exactly that depth.
+      if (ch === "{" && depth === 2) objectStart = i
       depth++
-    } else if (ch === "}") {
+    } else if (ch === "}" || ch === "]") {
       depth--
-      if (depth === 0 && objectStart !== -1) {
+      // Closing } that returns us to depth 2 completes a day object.
+      if (ch === "}" && depth === 2 && objectStart !== -1) {
         return { json: text.slice(objectStart, i + 1), end: i + 1 }
       }
     }
