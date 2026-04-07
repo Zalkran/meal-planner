@@ -36,7 +36,11 @@
 - Created docs/USER_GUIDE.md — user-facing feature documentation ✅
 - ZAL-14: Cache recipes in Supabase to reduce Claude API calls ✅
 
-## Session 5 — Next steps
+## Session 5 — Done
+- ZAL-15: Streaming attempted and reverted — Cloudflare (Supabase CDN) terminates outbound streaming connections to Anthropic before all 7 days arrive; needs a different infrastructure approach before retrying
+
+## Session 6 — Next steps
+- [ ] ZAL-15: Stream generate-meal-plan (needs alternative approach — see session 5 notes)
 - [ ] ZAL-8: Generate a consolidated shopping list
 - [ ] ZAL-9: Check off and copy the shopping list
 - [ ] Deploy frontend to Vercel
