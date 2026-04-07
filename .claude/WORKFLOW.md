@@ -54,6 +54,7 @@ Claude Code must follow these steps in order. Do not skip any.
 
 ### Step 1 — Test acceptance criteria
 - For Edge Functions: write and run Deno tests covering every AC item
+- If Deno is not available in the shell, perform a manual code review against each AC item explicitly, state pass/fail for each, and flag that Deno needs to be installed
 - For frontend: run `npm run build` (must pass with zero errors), then go through each AC item explicitly and confirm pass/fail
 - If any AC item fails: fix it, retest, do not proceed until all pass
 - Verify that all user-facing strings introduced in this feature 
@@ -65,8 +66,9 @@ are language-aware (no hardcoded English)
 - Use the Linear MCP tool to update the issue description
 
 ### Step 3 — Update documentation
-- Read `docs/TECHNICAL.md` and `docs/USER_GUIDE.md`
+- Read `docs/TECHNICAL.md`, `docs/USER_GUIDE.md`, and `PROGRESS.md`
 - Update only the sections affected by this commit
+- In PROGRESS.md, move the completed issue into the Done section of the current session
 - If a new Edge Function was added: document its endpoint, method,
   request body, response shape, and rate limit in TECHNICAL.md
 - If a new user-facing feature was added: describe it in USER_GUIDE.md
@@ -76,6 +78,10 @@ are language-aware (no hardcoded English)
 - Commit message must follow this format:
   `type: short description (ZAL-X)`
   where ZAL-X is the Linear issue ID — this creates the GitHub↔Linear deep link
+- The commit must also include a body (below the title) describing:
+  - What changed and why for each modified file or function
+  - Any non-obvious technical decisions made during implementation
+  - Example: "Cache write is fire-and-forget — a slow DB write never delays the user response"
 - Push to GitHub
 
 ---
