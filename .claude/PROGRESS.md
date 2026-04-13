@@ -39,12 +39,24 @@
 ## Session 5 — Done
 - ZAL-15: Streaming attempted and reverted — Cloudflare (Supabase CDN) terminates outbound streaming connections to Anthropic before all 7 days arrive; needs a different infrastructure approach before retrying
 
-## Session 6 — Next steps
+## Session 6 — Done
+- ZAL-16: Normalize recipes schema — replaced flat `recipes_cache` with `recipes` + `recipe_translations`; legacy table renamed to `recipes_cache_deprecated` ✅
+- ZAL-17: Update get-recipe Edge Function to read/write normalized schema (`recipes` + `recipe_translations`) ✅
+- ZAL-18: Pre-warm recipe cache after meal plan generation — 14 background get-recipe calls via `EdgeRuntime.waitUntil` ✅
+- ZAL-25: Shared-secret bypass for pre-warm rate limiting — `PREWARM_SECRET` header skips rate limiter in get-recipe for internal calls ✅
+
+## Session 7 — Next steps
 - [ ] ZAL-15: Stream generate-meal-plan (needs alternative approach — see session 5 notes)
 - [ ] ZAL-8: Generate a consolidated shopping list
 - [ ] ZAL-9: Check off and copy the shopping list
 - [ ] Deploy frontend to Vercel
 - [ ] Restrict CORS to Vercel domain
+- [ ] ZAL-19: Authentication phase 1 (see Linear — Recipe library project)
+- [ ] ZAL-20: Authentication phase 2 (see Linear — Authentication project)
+- [ ] ZAL-21: Authentication phase 3 (see Linear — Authentication project)
+- [ ] ZAL-22: Per-user recipe deduplication phase 1 (see Linear)
+- [ ] ZAL-23: Per-user recipe deduplication phase 2 (see Linear)
+- [ ] ZAL-24: Per-user recipe deduplication phase 3 (see Linear)
 
 ## Backlog
 - Cache popular meal plans in Supabase DB (v2)

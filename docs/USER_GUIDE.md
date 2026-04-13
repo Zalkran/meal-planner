@@ -34,6 +34,8 @@ Click on any meal in the plan to open its full recipe. The recipe shows:
 
 Close the recipe panel to return to the meal plan.
 
+> **Note for the curious:** Recipes are cached automatically after a plan is generated, so they typically open instantly. There is no visible difference to you — the recipe always appears the same way regardless of whether it came from cache or was generated fresh.
+
 ---
 
 ## Replace a meal

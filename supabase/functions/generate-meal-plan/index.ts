@@ -252,6 +252,59 @@ async function callClaude(prefs: UserPreferences): Promise<MealPlanResponse> {
 }
 
 // ---------------------------------------------------------------------------
+// Recipe cache pre-warming
+// ---------------------------------------------------------------------------
+
+// Calls get-recipe for each dish in the plan in parallel so that recipes are
+// cached before the user clicks on any dish. Runs entirely in the background
+// via EdgeRuntime.waitUntil — the meal plan response is never delayed.
+async function prewarmRecipes(days: Day[], language: string, servings: number): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")
+  if (!supabaseUrl || !anonKey) {
+    console.error("Prewarm skipped: SUPABASE_URL or SUPABASE_ANON_KEY not configured")
+    return
+  }
+
+  const prewarmSecret = Deno.env.get("PREWARM_SECRET")
+  if (!prewarmSecret) {
+    console.warn("PREWARM_SECRET not configured — pre-warm calls will be rate-limited as 'unknown'")
+  }
+
+  const recipeUrl = `${supabaseUrl}/functions/v1/get-recipe`
+  const dishNames = days.flatMap((d) => [d.lunch.name, d.dinner.name])
+
+  const results = await Promise.allSettled(
+    dishNames.map((dishName) => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "apikey": anonKey,
+      }
+      if (prewarmSecret) {
+        headers["x-internal-prewarm"] = prewarmSecret
+      }
+
+      return fetch(recipeUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ dishName, language, servings }),
+      }).then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`get-recipe responded ${res.status}: ${text}`)
+        }
+      })
+    }),
+  )
+
+  results.forEach((result, i) => {
+    if (result.status === "rejected") {
+      console.error(`Prewarm failed for "${dishNames[i]}":`, result.reason)
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Request handler
 // ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
@@ -302,7 +355,22 @@ Deno.serve(async (req: Request) => {
   // Generate meal plan
   try {
     const result = await callClaude(prefs)
-    return jsonResponse(result)
+    const response = jsonResponse(result)
+
+    // Pre-warm the recipe cache for all 14 dishes in the background.
+    // EdgeRuntime.waitUntil keeps the isolate alive until the promise settles
+    // without delaying the response to the caller.
+    const clampedServings = Math.max(1, Math.min(8, Number(prefs.servings) || 2))
+    const prewarmPromise = prewarmRecipes(result.days, prefs.language, clampedServings)
+    try {
+      EdgeRuntime.waitUntil(prewarmPromise)
+    } catch {
+      // EdgeRuntime.waitUntil unavailable — run detached.
+      // prewarmRecipes handles all internal errors and never rejects.
+      void prewarmPromise
+    }
+
+    return response
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error"
     const status = message.startsWith("Claude API error") ? 502 : 500

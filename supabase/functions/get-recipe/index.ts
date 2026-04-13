@@ -7,7 +7,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2"
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "content-type, authorization, x-client-info, apikey",
+  "Access-Control-Allow-Headers": "content-type, authorization, x-client-info, apikey, x-internal-prewarm",
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -106,9 +106,9 @@ function getSupabaseClient() {
 // ---------------------------------------------------------------------------
 // Cache helpers
 // ---------------------------------------------------------------------------
-function normalizeCacheKey(req: RecipeRequest): { dish_name: string; servings: number; language: string } {
+function normalizeCacheKey(req: RecipeRequest): { canonical_name: string; servings: number; language: string } {
   return {
-    dish_name: req.dishName.toLowerCase().trim(),
+    canonical_name: req.dishName.toLowerCase().trim(),
     servings: req.servings,
     language: req.language.split("-")[0].toLowerCase(),
   }
@@ -118,12 +118,22 @@ async function getCachedRecipe(req: RecipeRequest): Promise<Recipe | null> {
   const key = normalizeCacheKey(req)
   const supabase = getSupabaseClient()
 
+  // Step 1: look up the canonical dish row
+  const { data: recipeRow, error: recipeErr } = await supabase
+    .from("recipes")
+    .select("id")
+    .eq("canonical_name", key.canonical_name)
+    .maybeSingle()
+
+  if (recipeErr || !recipeRow) return null
+
+  // Step 2: look up the matching translation
   const { data, error } = await supabase
-    .from("recipes_cache")
+    .from("recipe_translations")
     .select("name, prep_time, cook_time, servings, ingredients, steps")
-    .eq("dish_name", key.dish_name)
-    .eq("servings", key.servings)
+    .eq("recipe_id", recipeRow.id)
     .eq("language", key.language)
+    .eq("servings", key.servings)
     .maybeSingle()
 
   if (error || !data) return null
@@ -142,24 +152,59 @@ async function writeCachedRecipe(req: RecipeRequest, recipe: Recipe): Promise<vo
   const key = normalizeCacheKey(req)
   const supabase = getSupabaseClient()
 
-  const { error } = await supabase
-    .from("recipes_cache")
+  // Step 1: upsert the canonical dish row, retrieve its id
+  const { data: recipeRow, error: recipeErr } = await supabase
+    .from("recipes")
+    .upsert(
+      { canonical_name: key.canonical_name },
+      { onConflict: "canonical_name", ignoreDuplicates: true },
+    )
+    .select("id")
+    .maybeSingle()
+
+  // ignoreDuplicates: true suppresses the returned row on conflict —
+  // fetch it explicitly when the upsert returns nothing.
+  let recipeId: number | null = recipeRow?.id ?? null
+
+  if (recipeErr) {
+    console.error("Cache write failed (recipes upsert):", recipeErr.message)
+    return
+  }
+
+  if (recipeId === null) {
+    const { data: existing, error: fetchErr } = await supabase
+      .from("recipes")
+      .select("id")
+      .eq("canonical_name", key.canonical_name)
+      .maybeSingle()
+
+    if (fetchErr || !existing) {
+      console.error("Cache write failed (recipes id fetch):", fetchErr?.message)
+      return
+    }
+
+    recipeId = existing.id
+  }
+
+  // Step 2: upsert the translation row
+  const { error: translationErr } = await supabase
+    .from("recipe_translations")
     .upsert(
       {
-        dish_name: key.dish_name,
-        servings: key.servings,
+        recipe_id: recipeId,
         language: key.language,
+        servings: key.servings,
         name: recipe.name,
         prep_time: recipe.prepTime,
         cook_time: recipe.cookTime,
         ingredients: recipe.ingredients,
         steps: recipe.steps,
       },
-      { onConflict: "dish_name,servings,language", ignoreDuplicates: true },
+      { onConflict: "recipe_id,language,servings", ignoreDuplicates: true },
     )
 
-  if (error) {
-    console.error("Cache write failed:", error.message)
+  if (translationErr) {
+    console.error("Cache write failed (recipe_translations upsert):", translationErr.message)
   }
 }
 
@@ -264,7 +309,16 @@ Deno.serve(async (req: Request) => {
     req.headers.get("x-real-ip") ??
     "unknown"
 
-  if (isRateLimited(ip)) {
+  const prewarmSecret = Deno.env.get("PREWARM_SECRET")
+  const prewarmHeader = req.headers.get("x-internal-prewarm")
+  const isInternalPrewarm =
+    prewarmSecret !== undefined &&
+    prewarmSecret.length > 0 &&
+    prewarmHeader === prewarmSecret
+
+  if (isInternalPrewarm) {
+    console.log("Prewarm bypass active for IP:", ip)
+  } else if (isRateLimited(ip)) {
     return jsonResponse({ error: "Too many requests. Please try again in an hour." }, 429)
   }
 

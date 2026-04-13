@@ -37,6 +37,7 @@ No account required — friction zero is a core principle.
 
 ### Secrets & env vars
 - ANTHROPIC_API_KEY → Supabase secrets (never in frontend)
+- PREWARM_SECRET → Supabase secrets (shared secret for internal pre-warm bypass)
 - VITE_SUPABASE_URL → .env file (never committed to Git)
 - VITE_SUPABASE_ANON_KEY → .env file (never committed to Git)
 
@@ -90,6 +91,10 @@ See .claude/PROGRESS.md for detailed progress.
 - ZAL-10: Create the Supabase Edge Function ✅
 - ZAL-11: Rate limit the Edge Function ✅
 - ZAL-12: View full recipe detail for a meal ✅
+- ZAL-16: Normalize recipes schema (recipes + recipe_translations) ✅
+- ZAL-17: Update get-recipe to read/write normalized schema ✅
+- ZAL-18: Pre-warm recipe cache after meal plan generation ✅
+- ZAL-25: PREWARM_SECRET bypass for internal pre-warm calls ✅
 
 ### Backlog
 - ZAL-7: Regenerate a single meal

@@ -51,7 +51,12 @@ VITE_SUPABASE_ANON_KEY=<your-anon-key>
 
 Both values are found in your Supabase project under **Settings → API**.
 
-The `ANTHROPIC_API_KEY` is stored as a Supabase secret and is never placed in `.env`.
+The following secrets are stored in Supabase (via `supabase secrets set`) and are never placed in `.env`:
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | `get-recipe`, `generate-meal-plan` | Authenticates calls to the Claude API |
+| `PREWARM_SECRET` | `generate-meal-plan` (sender), `get-recipe` (receiver) | Shared secret that lets internal pre-warm calls bypass the `get-recipe` rate limiter. Set to any long random string. Without it, pre-warm calls are rate-limited under the shared `"unknown"` IP bucket. |
 
 ### Deploy an Edge Function
 
@@ -119,18 +124,26 @@ Generates a 7-day meal plan based on user preferences.
 
 > **i18n note:** `labels` covers the static meal-plan UI strings (`lunch`, `dinner`, `yourMealPlan`, `modifyPreferences`). The replace-meal button strings (`replaceMeal`, `replacing`, `replaceError`) are handled client-side via `src/lib/i18n.js` using `navigator.language`, so they do not appear in this response.
 
+**Recipe cache pre-warming**
+
+After the meal plan response is returned to the caller, `generate-meal-plan` fires a background job (via `EdgeRuntime.waitUntil`) that calls `get-recipe` for all 14 dishes (7 days × lunch + dinner) in parallel using `Promise.allSettled`. This pre-populates the `recipes` and `recipe_translations` tables so that when the user opens any recipe, the cache is already warm and Claude is never called. A failure for any individual dish is logged and does not affect the others or the meal plan response.
+
 ---
 
 ### `get-recipe`
 
-Returns a full recipe for a named dish. Responses are cached in the `recipes_cache` Supabase table — a cache hit returns instantly without calling Claude API.
+Returns a full recipe for a named dish. Responses are cached in the normalized `recipes` / `recipe_translations` tables — a cache hit returns instantly without calling Claude API.
 
 **Cache behaviour**
 
-1. Normalise the key: lowercase + trim `dishName`, extract base language tag (e.g. `"fr"` from `"fr-FR"`), clamp `servings` to 1–8.
-2. Query `recipes_cache` for `(dish_name, servings, language)`.
-3. **Hit** — return the cached row immediately; Claude is never called.
-4. **Miss** — call Claude, return the recipe, write to cache in the background (fire-and-forget). A write failure is logged but never surfaced to the caller.
+1. Normalise the key: lowercase + trim `dishName` → `canonical_name`; extract base language tag (e.g. `"fr"` from `"fr-FR"`); clamp `servings` to 1–8.
+2. Query `recipes` for a row matching `canonical_name`.
+3. If found, query `recipe_translations` for `(recipe_id, language, servings)`.
+4. **Hit** — return the translation row immediately; Claude is never called.
+5. **Miss** — call Claude, return the recipe to the caller immediately, then fire-and-forget in the background:
+   a. Upsert into `recipes` on `canonical_name` (on conflict do nothing, then fetch the `id`).
+   b. Upsert into `recipe_translations` on `(recipe_id, language, servings)` (on conflict do nothing).
+   A write failure is logged but never surfaced to the caller.
 
 **Rate limit:** 20 requests / IP / hour
 
@@ -218,24 +231,46 @@ Suggests a single replacement dish for one meal slot, avoiding all dishes alread
 
 ## Database
 
-### `recipes_cache`
+The recipe cache uses a normalized two-table schema. The former flat `recipes_cache` table has been renamed to `recipes_cache_deprecated` and is no longer written to.
 
-Caches Claude API recipe responses to avoid redundant calls. Populated automatically by `get-recipe` on cache miss.
+### `recipes`
+
+One row per canonical dish name (lowercased, trimmed). Acts as the lookup key shared across all languages and serving counts.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | bigint (identity) | Primary key |
-| `dish_name` | text | Lowercased, trimmed dish name |
-| `servings` | integer (1–8) | Number of servings |
+| `canonical_name` | text | Lowercased, trimmed dish name — lookup key |
+| `created_at` | timestamptz | Defaults to `now()` |
+
+**Unique constraint:** `canonical_name`
+
+---
+
+### `recipe_translations`
+
+One row per dish × language × serving count. Foreign-keyed to `recipes`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigint (identity) | Primary key |
+| `recipe_id` | bigint | FK → `recipes.id`, `ON DELETE CASCADE` |
 | `language` | text | Base language tag (`"fr"`, `"en"`, etc.) |
+| `servings` | integer (1–8) | Number of servings |
 | `name` | text | Localised dish name as returned by Claude |
 | `prep_time` | text | e.g. `"15 min"` |
 | `cook_time` | text | e.g. `"45 min"` |
 | `ingredients` | jsonb | Array of `{ name, quantity }` objects |
 | `steps` | jsonb | Array of step strings |
-| `created_at` | timestamptz | Set on insert, defaults to `now()` |
+| `created_at` | timestamptz | Defaults to `now()` |
 
-**Unique constraint:** `(dish_name, servings, language)` — used as the cache key. Upserts with `ignoreDuplicates: true` make concurrent writes safe.
+**Unique constraint:** `(recipe_id, language, servings)` — cache key. Concurrent writes are safe via upsert with `ignoreDuplicates: true`.
+
+---
+
+### `recipes_cache_deprecated`
+
+Legacy flat table — renamed from `recipes_cache` during the ZAL-16 migration. Kept for rollback safety; not written to by any current function.
 
 ---
 
